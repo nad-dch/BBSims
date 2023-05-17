@@ -6,12 +6,15 @@ from pysm.nominal import models
 import os
 from pyshtools.utils import Wigner3j
 from noise_calc import Simons_Observatory_V3_SA_noise,Simons_Observatory_V3_SA_beams, Simons_Observatory_V3_SA_beam_FWHM
+import beam_convolution2 as bc
+import sys
+opj = os.path.join 
 
-def get_w3j(lmax=384):
+def get_w3j(data_path, lmax=384):
     """ Calculates Wigner 3J symbols (or reads them from file if they already exist).
     """
-    if os.path.isfile('data/w3j_lmax%d.npz' % lmax):
-        big_w3j = np.load('data/w3j_lmax%d.npz' % lmax)['w3j']
+    if os.path.isfile(opj(data_path,'w3j_lmax%d.npz' % lmax)):
+        big_w3j = np.load(opj(data_path,'w3j_lmax%d.npz' % lmax))['w3j']
     else:
         ells_w3j = np.arange(lmax+1)
         w3j = np.zeros_like(ells_w3j, dtype=float)
@@ -126,16 +129,12 @@ def map2cl(maps, maps2=None, iter=0):
     return cl_out
 
 
-def get_freqs():
+def get_freqs(band_names):
     """ Return 6 SO frequencies.
     """
-    return np.array([27., 39., 93., 145., 225., 280.])
-
-def get_freqs_bandnames():
-    """
-    Return SO band-names.
-    """
-    return np.array(['LF1', 'LF2', 'MF1', 'MF2', 'UHF1', 'UHF2'])
+    freq = {'LF1':27., 'LF2':39., 'MF1':93., 'MF2':145., 'UHF1':225., 'UHF2':280.}
+    return np.array([freq[name] for name in band_names])
+   
 
 def fcmb(nu):
     """ CMB SED (in antenna temperature units).
@@ -154,7 +153,7 @@ def comp_sed(nu,nu0,beta,temp,typ):
         x_to=0.04799244662211351*nu/temp
         x_from=0.04799244662211351*nu0/temp
         return (nu/nu0)**(1+beta)*(np.exp(x_from)-1)/(np.exp(x_to)-1)
-    elif typ=='sync':
+    elif typ=='sync' or typ=='synchrotron':
         return (nu/nu0)**beta
     return None
 
@@ -197,7 +196,7 @@ def get_delta_beta_amp(sigma, gamma):
     should achieve a given standard deviation. Assumes l_cutoff=2.
     Args:
         sigma: requested standard deviation.
-        gamma: tilt
+        gamma: t/ilt
     Returns:
         Spectral index power spectrum amplitude.
     """
@@ -312,14 +311,13 @@ def get_default_params():
     return mean_pars, moment_pars
 
 
-def get_mean_spectra(lmax, mean_pars):
+def get_mean_spectra(data_path, lmax, mean_pars):
     """ Computes amplitude power spectra for all components
     """
     ells = np.arange(lmax+1)
     dl2cl = np.ones(len(ells))
     dl2cl[1:] = 2*np.pi/(ells[1:]*(ells[1:]+1.))
     cl2dl = (ells*(ells+1.))/(2*np.pi)
-
     # Translate amplitudes to reference frequencies
     A_dust_BB = mean_pars['A_dust_BB'] * (comp_sed(mean_pars['nu0_dust'],
                                                    mean_pars['nu0_dust_def'],
@@ -363,7 +361,7 @@ def get_mean_spectra(lmax, mean_pars):
 
     # CMB amplitude
     # Lensing
-    l,dtt,dee,dbb,dte=np.loadtxt("data/camb_lens_nobb.dat",unpack=True)
+    l,dtt,dee,dbb,dte=np.loadtxt(opj(data_path,"camb_lens_nobb.dat"),unpack=True)
     l = l.astype(int)
     msk = l <= lmax
     l = l[msk]
@@ -382,7 +380,7 @@ def get_mean_spectra(lmax, mean_pars):
         cl_cmb_ee_lens *= 0
 
     # Lensing + r=1
-    l,dtt,dee,dbb,dte=np.loadtxt("data/camb_lens_r1.dat",unpack=True)
+    l,dtt,dee,dbb,dte=np.loadtxt(opj(data_path,"camb_lens_r1.dat"),unpack=True)
     l = l.astype(int)
     msk = l <= lmax
     l = l[msk]
@@ -410,7 +408,7 @@ def get_mean_spectra(lmax, mean_pars):
            cl_sync_bb, cl_sync_ee,
            cl_cmb_bb, cl_cmb_ee)
 
-def get_theory_sacc_OLD(nside, mean_pars=None, moment_pars=None, delta_ell=10, add_11=False, add_02=False):
+def get_theory_sacc_OLD(data_path, band_names, nside, lmax=None, mean_pars=None, moment_pars=None, delta_ell=10, add_11=False, add_02=False):
     """ Generate a SACC object containing a set of theory power spectra.
         nside: HEALPix resolution parameter.
         seed: seed to be used (if `None`, then a random seed will
@@ -424,9 +422,9 @@ def get_theory_sacc_OLD(nside, mean_pars=None, moment_pars=None, delta_ell=10, a
         A dictionary containing power spectrum information.
     """
     import sacc
-    nus = get_freqs()
+    nus = get_freqs(band_names)
     nfreq = len(nus)
-    th = get_theory_spectra(nside, mean_pars=mean_pars, moment_pars=moment_pars,
+    th = get_theory_spectra(data_path, band_names, nside, lmax=lmax, mean_pars=mean_pars, moment_pars=moment_pars,
                             delta_ell=delta_ell, add_11=add_11, add_02=add_02)
     l_eff = th['ls_binned']
 
@@ -466,16 +464,19 @@ def get_theory_sacc_OLD(nside, mean_pars=None, moment_pars=None, delta_ell=10, a
     s = sacc.SACC(trs, bnn, mean=sacc_mean, precision=sacc_prec)
     return s
 
-def get_bandpasses():
-    freqs = get_freqs()
-    for i_f, f in enumerate(freqs):
-        fs = np.array([f-1, f, f+1])
+def get_bandpasses(band_names):
+    freqs = get_freqs(band_names)
+    dict_out = {}
+    for band_name, i_f, f in zip(band_names, freqs, range(len(freqs))):
+        fs = np.array([i_f-1, i_f, i_f+1])
         bs = np.array([0., 1., 0.])
-    dict_out = {'fs': fs,
-                'bs': bs}
+        print('fs,bs=',fs,bs)
+        dict_i = {'fs': fs,
+                  'bs': bs}
+        dict_out[band_name] = dict_i
     return dict_out #np.transpose([fs, bs])
 
-def get_beams(nside, mean_pars):
+def get_beams(band_names, nside, mean_pars):
     """ Generate the beams in Fourier space.
         Inputs:
         nside: HEALPix resolution parameter.
@@ -485,17 +486,16 @@ def get_beams(nside, mean_pars):
     """
     ls = np.arange(3*nside)
     stout = ''
-    freqs = get_freqs()
-    band_names = get_freqs_bandnames()
+    freqs = get_freqs(band_names)
     if mean_pars['unit_beams']:
         b = {band_names[i_f]: np.ones(3*nside) for i_f, f in enumerate(freqs)}
     else: #actual SO beams
-        b = {band_names[i]: b for i, b in enumerate(Simons_Observatory_V3_SA_beams(ls))}
+        b = {band_names[i]: b for i, b in enumerate(Simons_Observatory_V3_SA_beams(band_names, ls))}
     dict_out = {'ls': ls,
                 'b': b}
     return dict_out #np.transpose([ls, b])
 
-def get_theory_sacc(nside, mean_pars=None, moment_pars=None, delta_ell=10, add_11=False, add_02=False):
+def get_theory_sacc(data_path, band_names, nside, lmax=None, mean_pars=None, moment_pars=None, delta_ell=10, add_11=False, add_02=False):
     """ Generate a SACC object containing a set of theory power spectra.
         nside: HEALPix resolution parameter.
         seed: seed to be used (if `None`, then a random seed will
@@ -515,10 +515,10 @@ def get_theory_sacc(nside, mean_pars=None, moment_pars=None, delta_ell=10, add_1
     if mean_pars is None:
         mean_pars, _ = get_default_params()
 
-    nus = get_freqs()
+    nus = get_freqs(band_names)
     nfreq = len(nus)
     npol = 2
-    th = get_theory_spectra(nside, mean_pars=mean_pars, moment_pars=moment_pars,
+    th = get_theory_spectra(data_path, band_names, nside, lmax=lmax, mean_pars=mean_pars, moment_pars=moment_pars,
                             delta_ell=delta_ell, add_11=add_11, add_02=add_02)
 
     # Bins/bandpowers
@@ -536,18 +536,16 @@ def get_theory_sacc(nside, mean_pars=None, moment_pars=None, delta_ell=10, add_1
 
     # Creating Sacc files
     s = sacc.Sacc()
-    
     # Adding tracers
-    bpss = get_bandpasses()
-    band_names = get_freqs_bandnames()
-    bms = get_beams(nside, mean_pars)
+    bpss = get_bandpasses(band_names)
+    bms = get_beams(band_names, nside, mean_pars)
     beam = bms['b']
     for inu, (nu, bnd) in enumerate(zip(nus, band_names)):
         s.add_tracer('NuMap', 'band%d' % (inu+1),
                      quantity='cmb_polarization',
                      spin=2,
-                     nu=bpss['fs'],
-                     bandpass=bpss['bs'],
+                     nu=bpss[bnd]['fs'],
+                     bandpass=bpss[bnd]['bs'],
                      ell=larr_all, #TODO: check what this is in save_cl
                      beam=beam[bnd], #beams['b'],
                      nu_unit='GHz',
@@ -589,7 +587,7 @@ def get_theory_sacc(nside, mean_pars=None, moment_pars=None, delta_ell=10, add_1
     
     return s
 
-def get_theory_spectra(nside, mean_pars=None, moment_pars=None, delta_ell=10, add_11=False, add_02=False):
+def get_theory_spectra(data_path, band_names, nside, lmax=None, mean_pars=None, moment_pars=None, delta_ell=10, add_11=False, add_02=False):
     """ Generate a set of theory power spectra for set of input sky parameters.
     Args:
         nside: HEALPix resolution parameter.
@@ -603,16 +601,15 @@ def get_theory_spectra(nside, mean_pars=None, moment_pars=None, delta_ell=10, ad
     Returns:
         A dictionary containing power spectrum information.
     """
-    nu = get_freqs()
+    nu = get_freqs(band_names)
     npix = hp.nside2npix(nside)
     if mean_pars is None:
         mean_pars, _ = get_default_params()
     if moment_pars is None:
         _, moment_pars = get_default_params()
-    lmax = 3*nside-1
 
     # Power spectra
-    ells, dl2cl, cl2dl, cl_dust_bb, cl_dust_ee, cl_sync_bb, cl_sync_ee, cl_cmb_bb, cl_cmb_ee = get_mean_spectra(lmax, mean_pars)
+    ells, dl2cl, cl2dl, cl_dust_bb, cl_dust_ee, cl_sync_bb, cl_sync_ee, cl_cmb_bb, cl_cmb_ee = get_mean_spectra(data_path, lmax, mean_pars)
 
     # Frequency spectra
     f_dust = comp_sed(nu, mean_pars['nu0_dust'], mean_pars['beta_dust'],
@@ -625,7 +622,7 @@ def get_theory_spectra(nside, mean_pars=None, moment_pars=None, delta_ell=10, ad
     f_cmb /= f_cmb
 
     # Background spectra
-    C_ells_sky = np.zeros([6, 2, 6, 2, len(ells)])
+    C_ells_sky = np.zeros([len(band_names), 2, len(band_names), 2, len(ells)])
     C_ells_sky[:, 0, :, 0, :] = (cl_cmb_ee[None, None, :] * np.outer(f_cmb, f_cmb)[:, :, None] +
                                  cl_dust_ee[None, None, :] * np.outer(f_dust, f_dust)[:, :, None] +
                                  cl_sync_ee[None, None, :] * np.outer(f_sync, f_sync)[:, :, None])
@@ -634,7 +631,7 @@ def get_theory_spectra(nside, mean_pars=None, moment_pars=None, delta_ell=10, ad
                                  cl_sync_bb[None, None, :] * np.outer(f_sync, f_sync)[:, :, None])
 
     # Add moments
-    w3j = get_w3j()
+    w3j = get_w3j(data_path=data_path)
     cl_beta_dust = get_delta_beta_cl(moment_pars['amp_beta_dust'],
                                      moment_pars['gamma_beta_dust'],
                                      ells, moment_pars['l0_beta_dust'],
@@ -708,9 +705,9 @@ def eb2qu(EB, nside, lmax=None):
     return hp.alm2map(alms, nside=nside, lmax=lmax, pol=False,
                       verbose=False)
 
-def get_sky_realization(nside, plaw_amps=True, gaussian_betas=True, seed=None,
-                        mean_pars=None, moment_pars=None,compute_cls=False,
-                        delta_ell=10):
+def get_sky_realization(data_path, band_names, nside, plaw_amps=True, gaussian_betas=True, seed=None,
+                        mean_pars=None, moment_pars=None,compute_cls=False,lmax=None,
+                        delta_ell=10, beam_convolve=False, simple_sky=False, **kwargs):
     """ Generate a sky realization for a set of input sky parameters.
     Args:
         nside: HEALPix resolution parameter.
@@ -734,7 +731,7 @@ def get_sky_realization(nside, plaw_amps=True, gaussian_betas=True, seed=None,
         contain information of the signal, noise and total 
         (i.e. signal + noise) power spectra. 
     """
-    nu = get_freqs()
+    nu = get_freqs(band_names)
     npix = hp.nside2npix(nside)
     if seed is not None:
         np.random.seed(seed)
@@ -742,8 +739,9 @@ def get_sky_realization(nside, plaw_amps=True, gaussian_betas=True, seed=None,
         mean_pars, _ = get_default_params()
     if moment_pars is None:
         _, moment_pars = get_default_params()
-    lmax = 3*nside-1
-    ells, dl2cl, cl2dl, cl_dust_bb, cl_dust_ee, cl_sync_bb, cl_sync_ee, cl_cmb_bb, cl_cmb_ee = get_mean_spectra(lmax, mean_pars)
+    if lmax is None:
+        lmax = 3*nside-1
+    ells, dl2cl, cl2dl, cl_dust_bb, cl_dust_ee, cl_sync_bb, cl_sync_ee, cl_cmb_bb, cl_cmb_ee = get_mean_spectra(data_path, lmax, mean_pars)
     cl0 = 0 * cl_dust_bb
 
     if plaw_amps:
@@ -756,7 +754,7 @@ def get_sky_realization(nside, plaw_amps=True, gaussian_betas=True, seed=None,
     else:
         # Dust amplitudes:
         if mean_pars['dust_amp_map']=='GNILC': #d10
-            QU_dust = hp.ud_grade(hp.read_map("data/gnilc_dust_template_nside256_equatorial.fits", verbose=False, field=[1,2]), nside_out=nside)
+            QU_dust = hp.ud_grade(hp.read_map(opj(data_path,"gnilc_dust_template_nside256_equatorial.fits"), verbose=False, field=[1,2]), nside_out=nside)
         else: #dm/d1
             QU_dust = hp.ud_grade(hp.read_map("./data/dust_QU_equatorial.fits", verbose=False, field=[0,1]), nside_out=nside)
         # Sync amplitudes:
@@ -849,16 +847,19 @@ def get_sky_realization(nside, plaw_amps=True, gaussian_betas=True, seed=None,
     c1[0]['A_Q'] = Q_cmb
     c1[0]['A_U'] = U_cmb
 
+    if simple_sky is True:
+        d2[0]['spectral_index'] = 1.59
+        s1[0]['spectral_index'] = -3.
+    sky_config = {'dust' : d2, 'synchrotron' : s1, 'cmb' : c1}
+
     # Beams
-    band_names = get_freqs_bandnames()
     if mean_pars['unit_beams']==True:
         bms_fwhm = np.ones_like(nu)
         smooth = False
     else:
-        bms_fwhm = Simons_Observatory_V3_SA_beam_FWHM()
+        bms_fwhm = Simons_Observatory_V3_SA_beam_FWHM(band_names)
         smooth = True
 
-    sky_config = {'dust' : d2, 'synchrotron' : s1, 'cmb' : c1}
     sky = pysm.Sky(sky_config)
     instrument_config = {
         'nside' : nside,
@@ -872,9 +873,24 @@ def get_sky_realization(nside, plaw_amps=True, gaussian_betas=True, seed=None,
         'output_directory' : 'none',
         'output_prefix' : 'none',
     }
-    sky = pysm.Sky(sky_config)
+  
     instrument = pysm.Instrument(instrument_config)
-    maps_signal, _ = instrument.observe(sky, write_outputs=False)
+    kwargs['betas'] = {'dust':np.mean(beta_dust), 'synchrotron':np.mean(beta_sync), 'cmb':1} 
+    kwargs['temps'] = {'dust':np.mean(temp_dust), 'synchrotron':None, 'cmb':None}    
+
+    # Attempt to replace pysm's observing function
+    kwargs['bms_fwhm'] = {band_n: None for band_n in band_names}
+    for band_idx,cond in enumerate(kwargs['parse_bms_fwhm']):
+        if cond:
+            kwargs['bms_fwhm'][band_names[band_idx]] = bms_fwhm[band_idx]
+    
+    output = bc.conv_sky(sky, band_names, nside, 
+                         lmax=lmax, blm_mmax=0, pol=False,
+                         **kwargs)
+
+    noise = instrument.noiser()
+    maps_signal, noise = instrument.unit_converter(output, noise)
+
     maps_signal = maps_signal[:,1:,:]
     # Change to CMB units
     maps_signal = maps_signal/fcmb(nu)[:,None,None]
@@ -902,7 +918,7 @@ def get_sky_realization(nside, plaw_amps=True, gaussian_betas=True, seed=None,
 
     return dict_out
 
-def create_noise_splits(nside, add_mask=False, sens=1, knee=1, ylf=1,
+def create_noise_splits(data_path, band_names, nside, lmax=None, add_mask=False, sens=1, knee=1, ylf=1,
                         fsky=0.1, nsplits=4):
     """ Generate instrumental noise realizations.
     Args:
@@ -920,16 +936,15 @@ def create_noise_splits(nside, add_mask=False, sens=1, knee=1, ylf=1,
         If `add_mask=True`, then the masked noise maps will
         be returned.
     """
-    nu = get_freqs()
+    nu = get_freqs(band_names)
     nfreq = len(nu)
-    lmax = 3*nside-1
     ells = np.arange(lmax+1)
     nells = len(ells)
     dl2cl = np.ones(len(ells))
     dl2cl[1:] = 2*np.pi/(ells[1:]*(ells[1:]+1.))
     cl2dl = (ells*(ells+1.))/(2*np.pi)
     nell=np.zeros([nfreq,lmax+1])
-    _,nell[:,2:],_=Simons_Observatory_V3_SA_noise(sens,knee,ylf,fsky,lmax+1,1)
+    _,nell[:,2:],_=Simons_Observatory_V3_SA_noise(band_names, sens,knee,ylf,fsky,lmax+1,1)
     nell*=cl2dl[None,:]
 
     npol = 2
@@ -952,7 +967,7 @@ def create_noise_splits(nside, add_mask=False, sens=1, knee=1, ylf=1,
                                                 nside, pol=False, new=True,
                                                 verbose=False)[1:]
 
-    nhits=hp.ud_grade(hp.read_map("./data/norm_nHits_SA_35FOV.fits", verbose=False), nside_out=nside)
+    nhits=hp.ud_grade(hp.read_map(opj(data_path,"norm_nHits_SA_35FOV.fits"), verbose=False), nside_out=nside)
     nhits/=np.amax(nhits) 
     fsky_msk=np.mean(nhits) 
     nhits_binary=np.zeros_like(nhits)
