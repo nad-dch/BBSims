@@ -231,10 +231,12 @@ def Simons_Observatory_V3_LA_noise(sensitivity_mode,f_sky,ell_max,delta_ell,N_LF
 ### SAT CALCULATOR ###
 ####################################################################
 ####################################################################
-def Simons_Observatory_V3_SA_bands():
+def Simons_Observatory_V3_SA_bands(band_names):
     ## returns the band centers in GHz for a CMB spectrum
     ## if your studies require color corrections ask and we can estimate these for you
-    return(np.array([27.,39.,93.,145.,225.,280.]))
+    band_c = {'LF1':27., 'LF2':39., 'MF1':93., 'MF2':145., 'UHF1':225., 'UHF2':280.}
+    return np.array([band_c[name] for name in band_names])
+
 
 '''
 def Simons_Observatory_V3_SA_beams():
@@ -247,22 +249,17 @@ def Simons_Observatory_V3_SA_beams():
     beam_SAT_280 = 9.
     return(np.array([beam_SAT_27,beam_SAT_39,beam_SAT_93,beam_SAT_145,beam_SAT_225,beam_SAT_280]))
 '''
-def Simons_Observatory_V3_SA_beam_FWHM():
+def Simons_Observatory_V3_SA_beam_FWHM(band_names):
     ## returns the SAT beams in arcminutes
-    beam_SAT_27 = 91.
-    beam_SAT_39 = 63.
-    beam_SAT_93 = 30.
-    beam_SAT_145 = 17.
-    beam_SAT_225 = 11.
-    beam_SAT_280 = 9.
-    return(np.array([beam_SAT_27,beam_SAT_39,beam_SAT_93,beam_SAT_145,beam_SAT_225,beam_SAT_280]))
+    fwhm = {'LF1':91., 'LF2':63., 'MF1':26.8, 'MF2':17., 'UHF1':11., 'UHF2':9.}
+    return np.array([fwhm[name] for name in band_names])
 
-def Simons_Observatory_V3_SA_beams(ell):
-    SA_beams = Simons_Observatory_V3_SA_beam_FWHM() / np.sqrt(8. * np.log(2)) /60. * np.pi/180.
+def Simons_Observatory_V3_SA_beams(band_names, ell):
+    SA_beams = Simons_Observatory_V3_SA_beam_FWHM(band_names) / np.sqrt(8. * np.log(2)) /60. * np.pi/180.
     ## SAT beams as a sigma expressed in radians
     return [np.exp(-0.5*ell*(ell+1)*sig**2.) for sig in SA_beams]
 
-def Simons_Observatory_V3_SA_noise(sensitivity_mode,one_over_f_mode,SAT_yrs_LF,f_sky,ell_max,delta_ell,
+def Simons_Observatory_V3_SA_noise(band_names,sensitivity_mode,one_over_f_mode,SAT_yrs_LF,f_sky,ell_max,delta_ell,
                                    include_kludge=True, beam_stuff=False):
     ## returns noise curves in polarization only, including the impact of the beam, for the SO small aperture telescopes
     ## noise curves are polarization only
@@ -351,7 +348,9 @@ def Simons_Observatory_V3_SA_noise(sensitivity_mode,one_over_f_mode,SAT_yrs_LF,f
     MN_T_145 = W_T_145 * np.sqrt(A_arcmin)
     MN_T_225 = W_T_225 * np.sqrt(A_arcmin)
     MN_T_280 = W_T_280 * np.sqrt(A_arcmin)
-    Map_white_noise_levels = np.array([MN_T_27,MN_T_39,MN_T_93,MN_T_145,MN_T_225,MN_T_280])
+    
+    mn = {'LF1':MN_T_27, 'LF2':MN_T_39, 'MF1':MN_T_93, 'MF2':MN_T_145, 'UHF1':MN_T_225, 'UHF2':MN_T_280}
+    Map_white_noise_levels = np.array([mn[name] for name in band_names])
     #print("white noise levels (T): ",Map_white_noise_levels ,"[uK-arcmin]")
     
     ####################################################################
@@ -383,7 +382,7 @@ def Simons_Observatory_V3_SA_noise(sensitivity_mode,one_over_f_mode,SAT_yrs_LF,f
 
     if beam_stuff:
         ## include the impact of the beam
-        SA_beams = Simons_Observatory_V3_SA_beams() / np.sqrt(8. * np.log(2)) /60. * np.pi/180.
+        SA_beams = Simons_Observatory_V3_SA_beams(band_names) / np.sqrt(8. * np.log(2)) /60. * np.pi/180.
         ## SAT beams as a sigma expressed in radians
         N_ell_P_27  *= np.exp( ell*(ell+1)* SA_beams[0]**2. )
         N_ell_P_39  *= np.exp( ell*(ell+1)* SA_beams[1]**2. )
@@ -393,7 +392,7 @@ def Simons_Observatory_V3_SA_noise(sensitivity_mode,one_over_f_mode,SAT_yrs_LF,f
         N_ell_P_280 *= np.exp( ell*(ell+1)* SA_beams[5]**2. )
     
     ## make an array of noise curves for P
-    N_ell_P_SA = np.array([N_ell_P_27,N_ell_P_39,N_ell_P_93,N_ell_P_145,N_ell_P_225,N_ell_P_280])
-    
+    nell_p = {'LF1':N_ell_P_27, 'LF2':N_ell_P_39, 'MF1':N_ell_P_93, 'MF2':N_ell_P_145, 'UHF1':N_ell_P_225, 'UHF2':N_ell_P_280}
+    N_ell_P_SA = np.array([nell_p[name] for name in band_names]) 
     ####################################################################
     return(ell,N_ell_P_SA,Map_white_noise_levels)
