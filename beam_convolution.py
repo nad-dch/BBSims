@@ -672,13 +672,10 @@ def conv_sky(sky, band_names, nside, lmax=None, blm_mmax=0,
             if component not in kwargs['betas'].keys():
                 kwargs['temps'][component] = temps[component]
 
-    ## remove eventually and do it properly
-    # sky3 = pysm3.Sky(nside=nside, preset_strings=["d2", "s1", "c1"])
     # # if apply_bandpass:
     # bpss = np.array([np.loadtxt('/cfs/home/koda4949/simonsobs/beam_chromaticity/data/bandpasses/'+n+'.txt') for n in band_names])
     # bpss_nu = [bpss[i][:,0] for i in range(len(bpss))]
     # bpss_bnu = [bpss[i][:,1] for i in range(len(bpss))]
-    # print('freqs=',np.shape(bpss_nu),bpss_nu[0])
     
     for band_name,freq,freq_idx,scale_beam in zip(band_names,freqs,range(n_freqs),do_scaling):
  
@@ -689,9 +686,6 @@ def conv_sky(sky, band_names, nside, lmax=None, blm_mmax=0,
                 sig_i = getattr(sky, component)(freq, **kwargs)
 
                 # sig_i = sky3.get_emission(bpss_nu[freq_idx] * u.GHz, bpss_bnu[freq_idx])
-                # sig_i = 
-                # if apply_bpass:
-                #     sig_i = 
 
                 beam_fwhm = get_beam_fwhm(band_name=band_name, nside=nside,
                                           do_scaling=do_scaling[freq_idx], 
@@ -704,7 +698,7 @@ def conv_sky(sky, band_names, nside, lmax=None, blm_mmax=0,
 
                 sig_i = getattr(sky, component)(freq, **kwargs)
                 # sig_i = sky3.get_emission(bpss_nu[freq_idx] * u.GHz, bpss_bnu[freq_idx])
-                # print('sky3=',sky3)
+
                 alms = hp.map2alm(sig_i, lmax=lmax, pol=pol)
                 beam_blm = get_beam_blms(band_name=band_name, nside=nside, 
                                          lmax=lmax, blm_mmax=blm_mmax,
@@ -714,15 +708,10 @@ def conv_sky(sky, band_names, nside, lmax=None, blm_mmax=0,
 
                 alms_conv = np.zeros_like(alms)
 
-                # let's hack and play around
-
-                alms_conv[0][:lmax] = hp.almxfl(alms[0,:lmax],beam_blm[0,:])
-                alms_conv[1][:lmax] = hp.almxfl(alms[1,:lmax],beam_blm[1,:]) - hp.almxfl(alms[2,:lmax],beam_blm[2,:])
-                alms_conv[2][:lmax] = hp.almxfl(alms[2,:lmax],beam_blm[1,:]) - hp.almxfl(alms[1,:lmax],beam_blm[2,:])
-
-                alms_conv[0][lmax:] = alms[0,lmax:]
-                alms_conv[1][lmax:] = alms[1,lmax:]
-                alms_conv[2][lmax:] = alms[2,lmax:]
+                # first order perurbation of cross-pol
+                alms_conv[0] = hp.almxfl(alms[0,:],beam_blm[0,:])
+                alms_conv[1] = hp.almxfl(alms[1,:],beam_blm[1,:]) - hp.almxfl(alms[2,:],beam_blm[2,:])
+                alms_conv[2] = hp.almxfl(alms[2,:],beam_blm[1,:]) - hp.almxfl(alms[1,:],beam_blm[2,:])
 
                 sig[freq_idx,:,:] += hp.alm2map(alms_conv, nside=nside, lmax=lmax, pol=pol)
           
