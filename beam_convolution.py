@@ -13,7 +13,7 @@ import utils as ut
 import astropy.units as u
 import warnings
 import noise_calc as nc 
-import pysm3
+import pysm
 opj = os.path.join
 
 def get_freqs(band, band_width=0.2, nsamp_freqs=5):
@@ -518,7 +518,7 @@ def get_beam_fwhm(band_name, nside, do_scaling, comp=None, **kwargs):
     """
 
     fwhm = kwargs['bms_fwhm'][band_name]
-   
+    print('fwhm=',fwhm, fwhm is None) 
     if fwhm is None:
         fitting_keys = ['initial_param_file', 'tele', 'res', 'n_iter', 'acc']
         initial_param_file = kwargs['initial_param_file']
@@ -690,7 +690,8 @@ def conv_sky(sky, band_names, nside, lmax=None, blm_mmax=0,
                 beam_fwhm = get_beam_fwhm(band_name=band_name, nside=nside,
                                           do_scaling=do_scaling[freq_idx], 
                                           comp=component, **kwargs)
-                sig[freq_idx,:,:] += [hp.smoothing(sig_ij, np.radians(beam_fwhm/60.)) for sig_ij in sig_i]
+                print('before smoothing and shape of sig_i=',np.shape(sig_i))
+                sig[freq_idx,:,:] += hp.smoothing(sig_i, np.radians(beam_fwhm/60.))
 
         elif space=='harmonic':
 
